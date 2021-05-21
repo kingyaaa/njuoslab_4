@@ -151,6 +151,13 @@ void keyboardHandle(struct StackFrame *sf) {
 
 	if (dev[STD_IN].value < 0) { // with process blocked
 		// TODO: deal with blocked situation
+		dev[STD_IN].value++;
+		pt = (ProcessTable*)((uint32_t)(dev[STD_IN].pcb.prev) - (uint32_t)&(((ProcessTable*)0)->blocked));
+		pt->state = STATE_RUNNABLE;
+		pt->sleepTime = 0;
+		dev[STD_IN].pcb.prev = (dev[STD_IN].pcb.prev)->prev;
+		(dev[STD_IN].pcb.prev)->next = &(dev[STD_IN].pcb);
+
 	}
 
 	return;
@@ -247,6 +254,53 @@ void syscallRead(struct StackFrame *sf) {
 
 void syscallReadStdIn(struct StackFrame *sf) {
 	// TODO: complete `stdin`
+	if(dev[STD_IN].value == 0){
+		dev[STD_IN].value--;
+		pcb[current].blocked.next = dev[STD_IN].pcb.next;
+		pcb[current].blocked.prev = &(dev[STD_IN].pcb);
+		dev[STD_IN].pcb.next = &(pcb[current].blocked);
+		(pcb[current].blocked.next)->prev = &(pcb[current].blocked);
+		pcb[current].sleepTime = 0xFFFFFFF;
+		pcb[current].state = STATE_BLOCKED;
+		
+		asm volatile("int $0x20");
+		int sel = sf->ds;
+		char *str = (char *)sf->edx;
+		char character = 0;
+		int i = 0;
+		int size = sf->ebx;
+		asm volatile("movw %0, %%es"::"m"(sel));
+		/*		
+		for(int i = 0;i < size;i++){
+			character = getChar(keyBuffer[bufferHead+i]);
+			if(character > 0){
+				putChar(character);
+				asm volatile("movb %0, %%es:(%1)"::"r"(character),"r"(str+count));
+				count++;			
+			}
+		}
+		*/
+		while(i < size - 1){
+			if(bufferHead != bufferTail){
+				character = getChar(keyBuffer[bufferHead]);
+				bufferHead = (bufferHead + 1) % MAX_KEYBUFFER_SIZE;
+				putChar(character);
+				if(character != 0){
+					asm volatile("movb %0, %%es:(%1)"::"r"(character),"r"(str+i));
+					i++;
+				}	
+			}
+			else
+				break;
+		}
+		asm volatile("movb $0x00,%%es:(%0)"::"r"(str+i));
+		pcb[current].regs.eax = i;
+		return;
+	}
+	else if(dev[STD_IN].value < 0){
+		pcb[current].regs.eax = -1;
+		return;
+	}
 }
 
 void syscallFork(struct StackFrame *sf) {
@@ -352,16 +406,18 @@ void syscallSemInit(struct StackFrame *sf) {
 
 void syscallSemWait(struct StackFrame *sf) {
 	// TODO: complete `SemWait` and note that you need to consider some special situations
+	return;
 }
 
 void syscallSemPost(struct StackFrame *sf) {
 	int i = (int)sf->edx;
-	ProcessTable *pt = NULL;
+	//ProcessTable *pt = NULL;
 	if (i < 0 || i >= MAX_SEM_NUM) {
 		pcb[current].regs.eax = -1;
 		return;
 	}
 	// TODO: complete other situations
+	return;
 }
 
 void syscallSemDestroy(struct StackFrame *sf) {
